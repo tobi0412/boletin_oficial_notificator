@@ -9,6 +9,9 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def get_latest_bulletin_url():
     base_url = "https://boletinoficial.gba.gob.ar"
@@ -42,18 +45,52 @@ def get_pdf_url(section_url):
              
     return None
 
-def extract_page_3(pdf_content):
+import re
+
+def extract_appointments(pdf_content):
     pdf_file = io.BytesIO(pdf_content)
     reader = PyPDF2.PdfReader(pdf_file)
-    
-    if len(reader.pages) < 3:
-        return "El PDF tiene menos de 3 páginas."
-        
-    page = reader.pages[2] 
-    text = page.extract_text()
-    return text
+    full_text = ""
+    for page in reader.pages:
+        full_text += page.extract_text() + "\n"
 
-def send_email(content, pdf_content=None):
+    # Normalize text
+    normalized_text = re.sub(r'\s+', ' ', full_text)
+
+    # Split by Decree
+    decrees = re.split(r'(DECRETO N°\s*[\d/]+)', normalized_text)
+    
+    results = []
+    
+    for i in range(1, len(decrees), 2):
+        if i+1 >= len(decrees): break
+        decree_num = decrees[i].replace("DECRETO N°", "").strip()
+        content = decrees[i+1]
+        
+        # Stricter Regex for Appointments
+        designation_match = re.search(
+            r'ARTÍCULO 1°.*?Designar\s+(.*?)\s+al\s+(?:doctor|señor|doctora|señora|dr\.|dra\.|sr\.|sra\.)\s+(.*?)\s*\(DNI',
+            content,
+            re.IGNORECASE
+        )
+        
+        if designation_match:
+            position = designation_match.group(1).strip()
+            name = designation_match.group(2).strip()
+            
+            # Filter out if the match is too long (likely a false positive or bad extraction)
+            if len(position) > 200 or len(name) > 100:
+                continue
+
+            results.append({
+                'decree': decree_num,
+                'position': position,
+                'name': name
+            })
+            
+    return results
+
+def send_email(appointments):
     email_user = os.environ.get('EMAIL_USER')
     email_password = os.environ.get('EMAIL_PASSWORD')
     email_to = os.environ.get('EMAIL_TO')
@@ -65,11 +102,16 @@ def send_email(content, pdf_content=None):
     msg = MIMEMultipart()
     msg['From'] = email_user
     msg['To'] = email_to
-    msg['Subject'] = f"Boletín Oficial - Página 3 - {datetime.now().strftime('%Y-%m-%d')}"
+    msg['Subject'] = f"Nombramientos Boletín Oficial - {datetime.now().strftime('%Y-%m-%d')}"
 
-    body = f"Contenido de la página 3:\n\n{content}"
+    if not appointments:
+        body = "No se encontraron nombramientos en el Boletín Oficial de hoy."
+    else:
+        body = "Se encontraron los siguientes nombramientos:\n\n"
+        for app in appointments:
+            body += f"- Decreto {app['decree']}: Designación de {app['name']} como {app['position']}\n"
+
     msg.attach(MIMEText(body, 'plain'))
-    
     
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -92,7 +134,6 @@ def main():
         
     print(f"Enlace encontrado: {section_url}")
     
-
     try:
         section_id = section_url.split("/secciones/")[1].split("/")[0]
         pdf_url = f"https://boletinoficial.gba.gob.ar/secciones/{section_id}/descargar"
@@ -104,13 +145,15 @@ def main():
     response = requests.get(pdf_url)
     response.raise_for_status()
     
-    print("Extrayendo contenido de la página 3...")
-    text = extract_page_3(response.content)
-    print("Contenido extraído:")
-    print(text[:500] + "...") 
+    print("Extrayendo nombramientos...")
+    appointments = extract_appointments(response.content)
+    
+    print(f"Se encontraron {len(appointments)} nombramientos.")
+    for app in appointments:
+        print(f"- Decreto {app['decree']}: Designación de {app['name']} como {app['position']}")
     
     print("Enviando email...")
-    send_email(text)
+    send_email(appointments)
 
 if __name__ == "__main__":
     main()
