@@ -7,13 +7,20 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 
+def get_argentina_time():
+    # Argentina es UTC-3
+    return datetime.now(timezone.utc) - timedelta(hours=3)
+
 def get_latest_bulletin_url():
     base_url = "https://boletinoficial.gba.gob.ar"
+# ... (rest of file)
+
+
     url = f"{base_url}/ediciones-anteriores"
     response = requests.get(url)
     response.raise_for_status()
@@ -181,7 +188,7 @@ def send_email(decrees):
     msg = MIMEMultipart()
     msg['From'] = email_user
     msg['To'] = email_to
-    msg['Subject'] = f"Novedades Judiciales Boletín Oficial - {datetime.now().strftime('%Y-%m-%d')}"
+    msg['Subject'] = f"Novedades Judiciales Boletín Oficial - {get_argentina_time().strftime('%Y-%m-%d')}"
 
     if not decrees:
         html_content = "<p>No hubo renuncias o designaciones en el Poder Judicial en el Boletín Oficial de hoy.</p>"
@@ -238,9 +245,9 @@ def send_no_update_email():
     msg = MIMEMultipart()
     msg['From'] = email_user
     msg['To'] = email_to
-    msg['Subject'] = f"Estado Boletín Oficial - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    msg['Subject'] = f"Estado Boletín Oficial - {get_argentina_time().strftime('%Y-%m-%d %H:%M')}"
 
-    body = f"No se subió un nuevo Boletín Oficial a la fecha y hora: {datetime.now().strftime('%d/%m/%Y %H:%M')}."
+    body = f"No se subió un nuevo Boletín Oficial a la fecha y hora: {get_argentina_time().strftime('%d/%m/%Y %H:%M')}."
     msg.attach(MIMEText(body, 'plain'))
     
     try:
